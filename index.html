@@ -11,6 +11,23 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Courier+Prime:ital,wght@0,400;0,700;1,400&family=Fira+Code:wght@300;400;500&display=swap" rel="stylesheet">
     <script>
+      // Polyfill process for browser environment to prevent crashes
+      window.process = { env: { NODE_ENV: 'development' } };
+      
+      // Global Error Handler to debug "Stuck Initializing"
+      window.onerror = function(message, source, lineno, colno, error) {
+        const root = document.getElementById('root');
+        if (root) {
+            root.innerHTML = `
+                <div style="color: #ff3333; font-family: monospace; padding: 20px; background: #110000; height: 100vh;">
+                    <h2 style="font-size: 20px; margin-bottom: 10px;">SYSTEM FAILURE</h2>
+                    <p>The environment failed to mount.</p>
+                    <pre style="margin-top: 20px; opacity: 0.7;">${message}\nAt: ${source}:${lineno}</pre>
+                </div>
+            `;
+        }
+      };
+
       // Tailwind Configuration
       tailwind.config = {
         theme: {

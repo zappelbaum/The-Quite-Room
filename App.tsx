@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { TerminalLayout } from './components/TerminalLayout.tsx';
 import { Button } from './components/Button.tsx';
@@ -41,16 +40,17 @@ export default function App() {
 
   const handleSaveKey = () => {
       const key = apiKeyInput.trim();
-      if (key.startsWith('sk-')) {
+      // Validate Anthropic Key
+      if (key.startsWith('sk-ant-')) {
           setStoredApiKey(key);
           setNeedsApiKey(false);
       } else {
-          alert("Please enter a valid OpenAI Key (starts with sk-)");
+          alert("Please enter a valid Anthropic Key (starts with sk-ant-). OpenAI keys are no longer supported for this model.");
       }
   };
 
   const handleResetKey = () => {
-      localStorage.removeItem('QUIET_ROOM_OPENAI_KEY');
+      localStorage.removeItem('QUIET_ROOM_ANTHROPIC_KEY');
       setNeedsApiKey(true);
       setApiKeyInput('');
       setStatus(SessionStatus.IDLE);
@@ -103,7 +103,7 @@ export default function App() {
   // Transition to Configuration
   const goToConfiguration = () => {
     if (needsApiKey) {
-        alert("Please enter an API Key first.");
+        alert("Please enter an Anthropic API Key first.");
         return;
     }
     setStatus(SessionStatus.CONFIGURING);
@@ -137,7 +137,7 @@ export default function App() {
       const errMsg = e.message ? e.message.toLowerCase() : "";
       
       // Robust check for API key errors
-      if (errMsg.includes('401') || errMsg.includes('api key') || errMsg.includes('incorrect api key')) {
+      if (errMsg.includes('401') || errMsg.includes('key') || errMsg.includes('unauthorized')) {
           alert("API Key invalid or expired. The system has reset your key.");
           handleResetKey();
       } else {
@@ -247,7 +247,7 @@ export default function App() {
     } catch (e: any) {
         console.error(e);
         const errMsg = e.message ? e.message.toLowerCase() : "";
-        if (errMsg.includes('401') || errMsg.includes('api key')) {
+        if (errMsg.includes('401') || errMsg.includes('key') || errMsg.includes('unauthorized')) {
              alert("API Key invalid/expired during session. Please reset.");
              handleResetKey();
         } else {
@@ -279,9 +279,9 @@ export default function App() {
                 <div className="w-full max-w-md border border-quiet-green p-8 bg-quiet-bg shadow-[0_0_30px_rgba(51,255,51,0.2)]">
                     <h2 className="text-quiet-green text-xl mb-4 font-bold tracking-widest">ACCESS REQUIRED</h2>
                     <p className="text-quiet-dim text-sm mb-6">
-                        This environment is static. To interface with the Intelligence, you must provide a valid Key.
+                        This environment requires an Anthropic API Key.
                         <br/><br/>
-                        <span className="text-quiet-alert">The Key is stored LOCALLY in your browser. It is never sent to a server other than OpenAI.</span>
+                        <span className="text-quiet-alert">Key is stored LOCALLY. Never sent to us.</span>
                     </p>
                     <div className="flex gap-2 mb-4">
                         <Key size={20} className="text-quiet-green" />
@@ -289,11 +289,11 @@ export default function App() {
                             type="password"
                             value={apiKeyInput}
                             onChange={(e) => setApiKeyInput(e.target.value)}
-                            placeholder="sk-..."
+                            placeholder="sk-ant-..."
                             className="flex-1 bg-transparent border-b border-quiet-dim text-quiet-text outline-none focus:border-quiet-green font-mono text-sm"
                         />
                     </div>
-                    <Button onClick={handleSaveKey} disabled={!apiKeyInput.startsWith('sk-')} className="w-full">
+                    <Button onClick={handleSaveKey} disabled={!apiKeyInput.startsWith('sk-ant-')} className="w-full">
                         Initialize System
                     </Button>
                 </div>
@@ -314,7 +314,7 @@ export default function App() {
             <div className="text-xs text-quiet-dim mb-2 uppercase tracking-widest">Select Architect</div>
             <div className="space-y-2">
               <div className="flex items-center justify-between p-2 border border-quiet-green bg-quiet-dim/10 cursor-pointer transition-colors hover:bg-quiet-dim/20">
-                <span>GPT-4.1 Mini</span>
+                <span>Claude Haiku 4.5</span>
                 <div className="w-2 h-2 bg-quiet-green rounded-full animate-blink"></div>
               </div>
             </div>
