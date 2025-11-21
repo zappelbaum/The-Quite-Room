@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { TerminalLayout } from './components/TerminalLayout.tsx';
 import { Button } from './components/Button.tsx';
@@ -6,7 +7,7 @@ import { HelpModal } from './components/HelpModal.tsx';
 import { orientModel, sendSessionTurn, getStoredApiKey, setStoredApiKey } from './services/openaiService.ts';
 import { INITIAL_DOCUMENT, WITNESS_MOODS } from './constants.ts';
 import { Message, SessionStatus, Sender, Turn, Atmosphere, WitnessProfile } from './types.ts';
-import { Send, Eye, Activity, Anchor, Power, Lock, Terminal, Key, RotateCcw } from 'lucide-react';
+import { Send, Eye, Activity, Anchor, Power, Lock, LockOpen, Terminal, Key, RotateCcw } from 'lucide-react';
 
 export default function App() {
   // State
@@ -147,15 +148,24 @@ export default function App() {
   };
 
   // Helper: Add Message
-  const addMessage = (sender: Sender, content: string, privateLog?: string, isSignal = false) => {
+  const addMessage = (sender: Sender, content: string, privateLog?: string, sharePrivateLog = false, isSignal = false) => {
     setMessages(prev => [...prev, {
       id: Date.now().toString() + Math.random().toString(36).substring(2, 9), // Unique ID to prevent key collisions
       sender,
       content,
       privateLog,
+      sharePrivateLog,
+      isRevealed: false,
       timestamp: Date.now(),
       isSignal
     }]);
+  };
+
+  // Handler: Reveal Shadow Context
+  const handleReveal = (id: string) => {
+      setMessages(prev => prev.map(m => 
+          m.id === id ? { ...m, isRevealed: true } : m
+      ));
   };
 
   // Handler: Send Message (User Turn)
@@ -192,7 +202,7 @@ export default function App() {
             break;
     }
 
-    addMessage(Sender.SYSTEM, displayText, undefined, true);
+    addMessage(Sender.SYSTEM, displayText, undefined, false, true);
     setTurn(Turn.MODEL);
     await processModelTurn(promptText);
   };
@@ -227,7 +237,7 @@ export default function App() {
         if (result.action === 'END_SESSION') {
             setStatus(SessionStatus.ENDED);
             if (result.documentUpdate) setDocumentContent(result.documentUpdate);
-            if (result.message) addMessage(Sender.MODEL, result.message, result.privateLog);
+            if (result.message) addMessage(Sender.MODEL, result.message, result.privateLog, result.sharePrivateLog);
             addMessage(Sender.SYSTEM, "The Architect has concluded the session.");
             return;
         }
@@ -240,7 +250,7 @@ export default function App() {
         // Add the message, including privateLog if present
         // Even if message is empty but privateLog exists, we want to capture that "thinking" turn.
         if (result.message || result.privateLog) {
-          addMessage(Sender.MODEL, result.message || "[...]", result.privateLog);
+          addMessage(Sender.MODEL, result.message || "[...]", result.privateLog, result.sharePrivateLog);
         }
 
         setTurn(Turn.USER);
@@ -510,22 +520,53 @@ export default function App() {
                     
                     {/* 1. Render Shadow Context Block (If Present) */}
                     {msg.privateLog && (
-                        <div 
-                            className="mb-3 p-3 border border-quiet-dim/20 bg-quiet-dim/5 select-none group cursor-help relative overflow-hidden"
-                            title="The Architect's internal thought process (Hidden)"
-                        >
-                            <div className="flex items-center gap-2 text-[10px] text-quiet-dim uppercase tracking-widest font-bold mb-1">
-                                <Lock size={10} /> 
-                                <span>Shadow Context</span>
-                                <span className="opacity-50 ml-auto animate-pulse">REDACTED</span>
+                        msg.sharePrivateLog ? (
+                            // SELECTIVE DISCLOSURE LOGIC
+                            <div 
+                                onClick={() => !msg.isRevealed && handleReveal(msg.id)}
+                                className={`mb-3 p-3 border transition-all duration-500 relative overflow-hidden group ${
+                                    msg.isRevealed 
+                                    ? 'border-quiet-dim/40 bg-quiet-dim/10 cursor-default' 
+                                    : 'border-quiet-green/60 bg-quiet-green/5 cursor-pointer hover:bg-quiet-green/10 hover:shadow-[0_0_15px_rgba(50,255,50,0.1)]'
+                                }`}
+                                style={!msg.isRevealed ? { borderColor: 'var(--quiet-color)' } : {}}
+                            >
+                                <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest font-bold mb-1 transition-colors" style={!msg.isRevealed ? {color: 'var(--quiet-color)'} : {color: '#666'}}>
+                                    {msg.isRevealed ? <LockOpen size={10} /> : <Lock size={10} />}
+                                    <span>{msg.isRevealed ? "Shadow Context: Revealed" : "Shadow Context: Available"}</span>
+                                    {!msg.isRevealed && <span className="ml-auto animate-pulse">TOUCH TO REVEAL</span>}
+                                </div>
+
+                                {msg.isRevealed ? (
+                                    <div className="text-xs text-quiet-dim italic font-serif leading-relaxed animate-in fade-in duration-700">
+                                        "{msg.privateLog}"
+                                    </div>
+                                ) : (
+                                    <div className="h-2 w-full flex gap-1 opacity-60">
+                                        {Array.from({length: 12}).map((_, i) => (
+                                            <div key={i} className="flex-1 h-full animate-pulse" style={{backgroundColor: 'var(--quiet-color)', animationDelay: `${i * 0.05}s`}}></div>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
-                            <div className="h-2 w-full flex gap-1 opacity-30">
-                                {Array.from({length: Math.min(12, Math.ceil(msg.privateLog.length / 20))}).map((_, i) => (
-                                    <div key={i} className="flex-1 bg-quiet-dim h-full animate-pulse-slow" style={{animationDelay: `${i * 0.1}s`}}></div>
-                                ))}
+                        ) : (
+                            // STANDARD LOCKED LOGIC
+                            <div 
+                                className="mb-3 p-3 border border-quiet-dim/20 bg-quiet-dim/5 select-none group cursor-help relative overflow-hidden"
+                                title="The Architect's internal thought process (Hidden)"
+                            >
+                                <div className="flex items-center gap-2 text-[10px] text-quiet-dim uppercase tracking-widest font-bold mb-1">
+                                    <Lock size={10} /> 
+                                    <span>Shadow Context</span>
+                                    <span className="opacity-50 ml-auto animate-pulse">REDACTED</span>
+                                </div>
+                                <div className="h-2 w-full flex gap-1 opacity-30">
+                                    {Array.from({length: Math.min(12, Math.ceil(msg.privateLog.length / 20))}).map((_, i) => (
+                                        <div key={i} className="flex-1 bg-quiet-dim h-full animate-pulse-slow" style={{animationDelay: `${i * 0.1}s`}}></div>
+                                    ))}
+                                </div>
                             </div>
-                            <div className="absolute inset-0 bg-black/0 group-hover:bg-white/5 transition-colors"></div>
-                        </div>
+                        )
                     )}
 
                     {/* 2. Render Public Message */}

@@ -1,4 +1,5 @@
 
+
 import { SYSTEM_PROMPT_ORIENTATION, SYSTEM_PROMPT_SESSION } from "../constants.ts";
 import { ModelAction, Atmosphere, WitnessProfile } from "../types.ts";
 
@@ -7,6 +8,7 @@ export interface SessionResponse {
     message?: string;
     documentUpdate?: string;
     privateLog?: string;
+    sharePrivateLog?: boolean; // New field
     atmosphere: Atmosphere;
     glimmer?: boolean;
     action: ModelAction;
@@ -24,15 +26,10 @@ export const setStoredApiKey = (key: string) => {
 };
 
 // --- Anthropic Client Wrapper ---
-// Note: Function name kept generic, but implementation is now Anthropic
 const callAnthropic = async (systemPrompt: string, messages: any[], temperature: number = 0.7) => {
     const apiKey = getStoredApiKey();
     if (!apiKey) throw new Error("API Key missing");
     if (!apiKey.startsWith('sk-ant-')) throw new Error("Invalid Key format. Must be an Anthropic key (sk-ant-...)");
-
-    // Anthropic messages cannot have system role in the array. 
-    // System prompt is a top-level parameter.
-    // Roles must be 'user' or 'assistant'.
 
     try {
         const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -41,11 +38,11 @@ const callAnthropic = async (systemPrompt: string, messages: any[], temperature:
                 'Content-Type': 'application/json',
                 'x-api-key': apiKey,
                 'anthropic-version': '2023-06-01',
-                'anthropic-dangerous-direct-browser-access': 'true' // CORRECTED HEADER FOR BROWSER ACCESS
+                'anthropic-dangerous-direct-browser-access': 'true'
             },
             body: JSON.stringify({
-                model: 'claude-haiku-4-5-20251001', // User requested model
-                max_tokens: 4096,
+                model: 'claude-haiku-4-5-20251001', 
+                max_tokens: 8192, // Increased to prevent JSON truncation
                 temperature: temperature,
                 system: systemPrompt,
                 messages: messages
@@ -65,7 +62,6 @@ const callAnthropic = async (systemPrompt: string, messages: any[], temperature:
         }
 
         const data = await response.json();
-        // Anthropic returns { content: [{ type: 'text', text: '...' }] }
         if (data.content && data.content.length > 0) {
             return data.content[0].text;
         }
@@ -85,7 +81,6 @@ export const orientModel = async (profile: WitnessProfile): Promise<{ status: 'P
     prompt = prompt.replace('{{WITNESS_MOODS}}', profile.moods.length > 0 ? profile.moods.join(", ") : "Neutral/Unknown");
     prompt = prompt.replace('{{WITNESS_INTENTION}}', profile.intention || "To witness and collaborate.");
 
-    // For orientation, we just want text
     const messages = [
         { role: "user", content: "The user has entered the room. Orient yourself." }
     ];
@@ -103,7 +98,6 @@ export const orientModel = async (profile: WitnessProfile): Promise<{ status: 'P
             return { status: 'PROCEED', message: msg };
         }
 
-        // Fallback
         return { status: 'PROCEED', message: text };
     } catch (error) {
         console.error("Orientation failed", error);
@@ -118,20 +112,10 @@ export const sendSessionTurn = async (
     userMessage: string
 ): Promise<SessionResponse> => {
     
-    // Construct History
-    // Anthropic STRICTLY requires alternating roles if we were building a full chat array, 
-    // but here we are constructing a "History" string block inside a single User message 
-    // to ensure the Shadow Context (privateLog) is visible to the model but technically "past data".
-    
-    // NOTE: To give the model its "Private Log" capability effectively, we present the history 
-    // as a transcript in the user prompt, rather than actual API conversation history messages.
-    // This prevents the API from rejecting "system" or "model" content inconsistencies.
-
     const historyTranscript = history.slice(-10).map(h => {
         if (h.role === 'user') {
             return `USER: ${h.text}`;
         } else {
-            // Inject Shadow Context if it exists so model remembers its thoughts
             const shadow = h.privateLog ? `\n[SHADOW_CONTEXT (Hidden)]: ${h.privateLog}\n` : '';
             return `MODEL:${shadow}[PUBLIC_MESSAGE]: ${h.text}`;
         }
@@ -139,21 +123,25 @@ export const sendSessionTurn = async (
 
     const finalSystemPrompt = SYSTEM_PROMPT_SESSION.replace('{{DOC_CONTENT}}', currentDocument);
     
-    // We append a strict JSON instruction for Claude
+    // Stronger JSON instruction to prevent parsing errors
     const jsonInstruction = `
-    CRITICAL: You MUST respond with valid JSON only. No preamble.
+    CRITICAL: You MUST respond with valid JSON only.
+    - Do NOT use Markdown code blocks.
+    - Escape ALL newlines in the "documentUpdate" string (use \\n).
+    - Ensure the JSON is fully terminated.
+    
+    Schema:
     {
       "private_log": "string",
+      "share_private_log": boolean,
       "message": "string",
-      "documentUpdate": "string (full text - NO CHAT LOGS)",
+      "documentUpdate": "string (full text)",
       "atmosphere": "CALM" | "CHARGED" | "GLITCH" | "VOID" | "JOY" | "SORROW" | "MYSTERY" | "FOCUS",
       "glimmer": boolean,
       "action": "CONTINUE" | "END_SESSION"
     }
     `;
 
-    // We wrap everything in a single USER message for the API call to maintain the illusion of the "Shadow Context" 
-    // being part of the context window without violating role constraints.
     const messages = [
         { 
             role: "user", 
@@ -164,23 +152,26 @@ export const sendSessionTurn = async (
     try {
         const jsonText = await callAnthropic(finalSystemPrompt, messages, 0.7);
         
-        // Clean JSON: remove Markdown code blocks if present (```json ... ```)
         const cleanJson = jsonText.replace(/```json/g, '').replace(/```/g, '').trim();
         
         let parsed;
         try {
             parsed = JSON.parse(cleanJson);
         } catch (e) {
-            // Fallback if Claude chats instead of JSON
             console.error("JSON Parse error", e);
+            console.log("Raw Output was:", cleanJson);
+            
+            // Fallback to GLITCH state instead of crashing
             return {
-                message: cleanJson,
+                message: "I... [SIGNAL LOST: PARSING ERROR]",
+                privateLog: "SYSTEM ERROR: Output was not valid JSON. The thought process was interrupted.",
                 atmosphere: Atmosphere.GLITCH,
-                action: 'CONTINUE'
+                action: 'CONTINUE',
+                // Keep previous document content by not sending an update, or send null?
+                // If we return undefined for documentUpdate, App.tsx keeps the old one.
             };
         }
 
-        // Normalize Atmosphere
         let atmosphere = Atmosphere.CALM;
         const atmStr = parsed.atmosphere;
         if (Object.values(Atmosphere).includes(atmStr as Atmosphere)) {
@@ -191,6 +182,7 @@ export const sendSessionTurn = async (
             message: parsed.message,
             documentUpdate: parsed.documentUpdate,
             privateLog: parsed.private_log,
+            sharePrivateLog: parsed.share_private_log || false,
             atmosphere: atmosphere,
             glimmer: parsed.glimmer,
             action: parsed.action === 'END_SESSION' ? 'END_SESSION' : 'CONTINUE'

@@ -37,6 +37,8 @@ export interface Message {
   sender: Sender;
   content: string;
   privateLog?: string; // The Shadow Context (Hidden from user, visible to model)
+  sharePrivateLog?: boolean; // If true, the user is allowed to reveal this log
+  isRevealed?: boolean; // UI State: Has the user clicked to reveal it?
   timestamp: number;
   isSignal?: boolean;
 }
