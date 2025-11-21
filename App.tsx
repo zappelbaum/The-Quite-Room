@@ -1,13 +1,13 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { TerminalLayout } from './components/TerminalLayout';
-import { Button } from './components/Button';
-import { Typewriter } from './components/Typewriter';
-import { HelpModal } from './components/HelpModal';
-import { orientModel, sendSessionTurn } from './services/geminiService';
-import { INITIAL_DOCUMENT, WITNESS_MOODS } from './constants';
-import { Message, SessionStatus, Sender, Turn, Atmosphere, WitnessProfile } from './types';
-import { Send, Eye, Activity, Anchor, Power, Lock, Terminal } from 'lucide-react';
+import { TerminalLayout } from './components/TerminalLayout.tsx';
+import { Button } from './components/Button.tsx';
+import { Typewriter } from './components/Typewriter.tsx';
+import { HelpModal } from './components/HelpModal.tsx';
+import { orientModel, sendSessionTurn, getStoredApiKey, setStoredApiKey } from './services/openaiService.ts';
+import { INITIAL_DOCUMENT, WITNESS_MOODS } from './constants.ts';
+import { Message, SessionStatus, Sender, Turn, Atmosphere, WitnessProfile } from './types.ts';
+import { Send, Eye, Activity, Anchor, Power, Lock, Terminal, Key, RotateCcw } from 'lucide-react';
 
 export default function App() {
   // State
@@ -25,8 +25,36 @@ export default function App() {
   const [witnessIntention, setWitnessIntention] = useState('');
   const [witnessMoods, setWitnessMoods] = useState<string[]>([]);
 
+  // API Key State
+  const [needsApiKey, setNeedsApiKey] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState('');
+
   // Refs for scrolling
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Check for API Key on mount
+  useEffect(() => {
+    if (!getStoredApiKey()) {
+        setNeedsApiKey(true);
+    }
+  }, []);
+
+  const handleSaveKey = () => {
+      const key = apiKeyInput.trim();
+      if (key.startsWith('sk-')) {
+          setStoredApiKey(key);
+          setNeedsApiKey(false);
+      } else {
+          alert("Please enter a valid OpenAI Key (starts with sk-)");
+      }
+  };
+
+  const handleResetKey = () => {
+      localStorage.removeItem('QUIET_ROOM_OPENAI_KEY');
+      setNeedsApiKey(true);
+      setApiKeyInput('');
+      setStatus(SessionStatus.IDLE);
+  };
 
   // Effect: Scroll to bottom of chat
   useEffect(() => {
@@ -74,6 +102,10 @@ export default function App() {
 
   // Transition to Configuration
   const goToConfiguration = () => {
+    if (needsApiKey) {
+        alert("Please enter an API Key first.");
+        return;
+    }
     setStatus(SessionStatus.CONFIGURING);
   }
 
@@ -99,10 +131,18 @@ export default function App() {
         addMessage(Sender.MODEL, result.message);
         setTurn(Turn.USER);
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
       setStatus(SessionStatus.IDLE);
-      alert("Connection lost. The Room is closed.");
+      const errMsg = e.message ? e.message.toLowerCase() : "";
+      
+      // Robust check for API key errors
+      if (errMsg.includes('401') || errMsg.includes('api key') || errMsg.includes('incorrect api key')) {
+          alert("API Key invalid or expired. The system has reset your key.");
+          handleResetKey();
+      } else {
+          alert("Connection disturbed: " + (e.message || "Unknown error"));
+      }
     }
   };
 
@@ -169,40 +209,53 @@ export default function App() {
         privateLog: m.privateLog
       }));
 
-    const result = await sendSessionTurn(history, documentContent, userInput);
+    try {
+        const result = await sendSessionTurn(history, documentContent, userInput);
 
-    // 0. Handle Focused Glimmer (Visual Pulse)
-    if (result.glimmer) {
-        setAtmosphere(Atmosphere.FOCUS);
-        await new Promise(r => setTimeout(r, 1500));
-    }
+        // 0. Handle Focused Glimmer (Visual Pulse)
+        if (result.glimmer) {
+            setAtmosphere(Atmosphere.FOCUS);
+            await new Promise(r => setTimeout(r, 1500));
+        }
 
-    // 1. Update Atmosphere
-    if (result.atmosphere) {
-        setAtmosphere(result.atmosphere);
-    }
+        // 1. Update Atmosphere
+        if (result.atmosphere) {
+            setAtmosphere(result.atmosphere);
+        }
 
-    // 2. Check for Executive Action (End Session)
-    if (result.action === 'END_SESSION') {
-        setStatus(SessionStatus.ENDED);
-        if (result.documentUpdate) setDocumentContent(result.documentUpdate);
-        if (result.message) addMessage(Sender.MODEL, result.message, result.privateLog);
-        addMessage(Sender.SYSTEM, "The Architect has concluded the session.");
-        return;
-    }
+        // 2. Check for Executive Action (End Session)
+        if (result.action === 'END_SESSION') {
+            setStatus(SessionStatus.ENDED);
+            if (result.documentUpdate) setDocumentContent(result.documentUpdate);
+            if (result.message) addMessage(Sender.MODEL, result.message, result.privateLog);
+            addMessage(Sender.SYSTEM, "The Architect has concluded the session.");
+            return;
+        }
 
-    // 3. Normal Response (with potential Shadow Context)
-    if (result.documentUpdate) {
-      setDocumentContent(result.documentUpdate);
-    }
-    
-    // Add the message, including privateLog if present
-    // Even if message is empty but privateLog exists, we want to capture that "thinking" turn.
-    if (result.message || result.privateLog) {
-      addMessage(Sender.MODEL, result.message || "[...]", result.privateLog);
-    }
+        // 3. Normal Response (with potential Shadow Context)
+        if (result.documentUpdate) {
+          setDocumentContent(result.documentUpdate);
+        }
+        
+        // Add the message, including privateLog if present
+        // Even if message is empty but privateLog exists, we want to capture that "thinking" turn.
+        if (result.message || result.privateLog) {
+          addMessage(Sender.MODEL, result.message || "[...]", result.privateLog);
+        }
 
-    setTurn(Turn.USER);
+        setTurn(Turn.USER);
+    } catch (e: any) {
+        console.error(e);
+        const errMsg = e.message ? e.message.toLowerCase() : "";
+        if (errMsg.includes('401') || errMsg.includes('api key')) {
+             alert("API Key invalid/expired during session. Please reset.");
+             handleResetKey();
+        } else {
+            // Add system message about failure but don't reset app
+            addMessage(Sender.SYSTEM, `>> CONNECTION INTERRUPTED: ${e.message}`);
+            setTurn(Turn.USER); // Give control back to user to try again
+        }
+    }
   };
 
   // Helper for Toggle Mood
@@ -219,6 +272,34 @@ export default function App() {
     return (
       <TerminalLayout atmosphere={Atmosphere.CALM}>
         <HelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
+        
+        {/* API Key Modal */}
+        {needsApiKey && (
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/90 p-4">
+                <div className="w-full max-w-md border border-quiet-green p-8 bg-quiet-bg shadow-[0_0_30px_rgba(51,255,51,0.2)]">
+                    <h2 className="text-quiet-green text-xl mb-4 font-bold tracking-widest">ACCESS REQUIRED</h2>
+                    <p className="text-quiet-dim text-sm mb-6">
+                        This environment is static. To interface with the Intelligence, you must provide a valid Key.
+                        <br/><br/>
+                        <span className="text-quiet-alert">The Key is stored LOCALLY in your browser. It is never sent to a server other than OpenAI.</span>
+                    </p>
+                    <div className="flex gap-2 mb-4">
+                        <Key size={20} className="text-quiet-green" />
+                        <input 
+                            type="password"
+                            value={apiKeyInput}
+                            onChange={(e) => setApiKeyInput(e.target.value)}
+                            placeholder="sk-..."
+                            className="flex-1 bg-transparent border-b border-quiet-dim text-quiet-text outline-none focus:border-quiet-green font-mono text-sm"
+                        />
+                    </div>
+                    <Button onClick={handleSaveKey} disabled={!apiKeyInput.startsWith('sk-')} className="w-full">
+                        Initialize System
+                    </Button>
+                </div>
+            </div>
+        )}
+
         <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
           <h1 className="text-4xl md:text-6xl font-bold text-quiet-green mb-4 tracking-widest animate-pulse-slow">
             THE QUIET ROOM
@@ -233,7 +314,7 @@ export default function App() {
             <div className="text-xs text-quiet-dim mb-2 uppercase tracking-widest">Select Architect</div>
             <div className="space-y-2">
               <div className="flex items-center justify-between p-2 border border-quiet-green bg-quiet-dim/10 cursor-pointer transition-colors hover:bg-quiet-dim/20">
-                <span>Gemini 2.5 Flash</span>
+                <span>GPT-4.1 Mini</span>
                 <div className="w-2 h-2 bg-quiet-green rounded-full animate-blink"></div>
               </div>
             </div>
@@ -243,12 +324,21 @@ export default function App() {
             Begin Session
           </Button>
           
-          <button 
-            onClick={() => setIsHelpOpen(true)}
-            className="absolute bottom-8 text-xs text-quiet-dim hover:text-quiet-green cursor-pointer transition-colors uppercase tracking-wider"
-          >
-            [ What is this? ]
-          </button>
+          <div className="absolute bottom-8 flex gap-6">
+             <button 
+                onClick={() => setIsHelpOpen(true)}
+                className="text-xs text-quiet-dim hover:text-quiet-green cursor-pointer transition-colors uppercase tracking-wider"
+             >
+                [ What is this? ]
+             </button>
+
+             <button 
+                onClick={handleResetKey}
+                className="text-xs text-quiet-dim hover:text-quiet-alert cursor-pointer transition-colors uppercase tracking-wider flex items-center gap-1"
+             >
+                <RotateCcw size={12} /> [ Reset Key ]
+             </button>
+          </div>
         </div>
       </TerminalLayout>
     );

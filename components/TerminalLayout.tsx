@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Atmosphere } from '../types';
+import { Atmosphere } from '../types.ts';
 
 interface Props {
   children: React.ReactNode;

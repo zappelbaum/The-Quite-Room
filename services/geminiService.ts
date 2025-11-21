@@ -1,7 +1,7 @@
 
 import { GoogleGenAI, Type, Schema } from "@google/genai";
-import { SYSTEM_PROMPT_ORIENTATION, SYSTEM_PROMPT_SESSION } from "../constants";
-import { ModelAction, Atmosphere, WitnessProfile } from "../types";
+import { SYSTEM_PROMPT_ORIENTATION, SYSTEM_PROMPT_SESSION } from "../constants.ts";
+import { ModelAction, Atmosphere, WitnessProfile } from "../types.ts";
 
 // Initialize Gemini
 const getClient = () => {
